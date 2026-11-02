@@ -27,7 +27,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from app.services.windowed_detection import SequenceRule, WindowedDetectionEngine
+from app.services.windowed_detection import FIRED_CONFIRMED, SequenceRule, WindowedDetectionEngine, WindowedHit
 
 from tests.redis_doubles import FakeRedis
 
@@ -144,6 +144,39 @@ async def test_it_fires_once_per_window() -> None:
     tenant = str(uuid4())
     await engine.evaluate(_event(tenant, "failure", 1000.0))
     assert await engine.evaluate(_event(tenant, "success", 1060.0))
+    assert not await engine.evaluate(_event(tenant, "success", 1120.0))
+
+
+@pytest.mark.asyncio
+async def test_a_released_sequence_fire_re_fires_on_redelivery() -> None:
+    """The consumer releases a hit whose alert failed to persist, and the
+    message is re-delivered so the alert can be recovered. A sequence fire
+    used to write its window-long marker up front with nothing to release, so
+    the re-delivery found the marker and the alert was lost for the window."""
+    engine = _engine()
+    tenant = str(uuid4())
+    await engine.evaluate(_event(tenant, "failure", 1000.0), event_id="evt-fail")
+    success = _event(tenant, "success", 1060.0)
+    hits = await engine.evaluate(success, event_id="evt-success")
+    assert [h.rule_id for h in hits] == [SPRAY_THEN_SUCCESS.id]
+
+    await engine.release(hits[0])
+
+    again = await engine.evaluate(success, event_id="evt-success")
+    assert [h.rule_id for h in again] == [SPRAY_THEN_SUCCESS.id]
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_sequence_fire_holds_for_the_window() -> None:
+    engine = _engine()
+    tenant = str(uuid4())
+    await engine.evaluate(_event(tenant, "failure", 1000.0))
+    hits = await engine.evaluate(_event(tenant, "success", 1060.0))
+    assert hits
+    hit = hits[0]
+    assert isinstance(hit, WindowedHit)
+    await engine.confirm(hit)
+    assert await engine._redis.get(hit.claim_key) == FIRED_CONFIRMED
     assert not await engine.evaluate(_event(tenant, "success", 1120.0))
 
 

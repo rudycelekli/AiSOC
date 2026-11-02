@@ -705,7 +705,7 @@ class WindowedDetectionEngine:
 
     async def _advance_sequence(
         self, rule: SequenceRule, tenant: str, fields: dict[str, Any], now: float, token: str
-    ) -> DetectionHit | None:
+    ) -> WindowedHit | None:
         """Record what this event satisfies, then look for a complete chain.
 
         Recording first and searching second is what makes the ordering a
@@ -752,14 +752,24 @@ class WindowedDetectionEngine:
         )
         if not complete:
             return None
-        if not await self._redis.set(f"{base}:fired", "1", nx=True, ex=rule.window_seconds):
+        # A claim, exactly as for a threshold fire. A window-long "1" written
+        # here, before anything was persisted, carried no claim for the
+        # consumer to release, so a failed persist left the marker in place
+        # and the re-delivery that exists to recover the alert was suppressed
+        # for the whole window. `confirm` promotes this to the window-long
+        # marker (`_cooldown_for` already resolves a sequence's window).
+        fired_key = f"{base}:fired"
+        claim_token = uuid.uuid4().hex
+        if not await self._redis.set(fired_key, claim_token, nx=True, ex=FIRE_CLAIM_SECONDS):
             return None
-        return DetectionHit(
+        return WindowedHit(
             rule_id=rule.id,
             name=rule.name,
             severity=rule.severity,
             category=rule.category,
             mitre=list(rule.mitre),
+            claim_key=fired_key,
+            claim_token=claim_token,
         )
 
     async def _observe_and_check(
