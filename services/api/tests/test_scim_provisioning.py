@@ -789,6 +789,39 @@ class TestProviderSequences:
         assert response.status_code == 200
         assert response.json()["active"] is False
 
+    async def test_a_filtered_attribute_path_does_not_fail_the_deactivation_beside_it(self, client):
+        """Entra addresses multi-valued attributes with a filter in the path,
+        `emails[type eq "work"].value`, in its default attribute mapping.
+
+        The filter used to fail the whole PATCH with `invalidPath`, so the
+        deactivation in the same body was not applied.
+        """
+        created = await client.post(f"{BASE}/Users", json=ENTRA_CREATE_USER)
+        user_id = created.json()["id"]
+        response = await client.patch(
+            f"{BASE}/Users/{user_id}",
+            json={
+                "schemas": [PATCH_SCHEMA],
+                "Operations": [
+                    {"op": "Replace", "path": "active", "value": "False"},
+                    {"op": "Replace", "path": 'emails[type eq "work"].value', "value": "grace@example.com"},
+                ],
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["active"] is False
+
+    async def test_an_unsupported_member_filter_is_still_refused(self, client):
+        """Ignoring this one would be wrong: `remove` on `members` with the
+        filter dropped empties the group."""
+        group = await client.post(f"{BASE}/Groups", json={"displayName": "AiSOC SOC Lead"})
+        response = await client.patch(
+            f"{BASE}/Groups/{group.json()['id']}",
+            json={"schemas": [PATCH_SCHEMA], "Operations": [{"op": "remove", "path": 'members[display eq "ada"]'}]},
+        )
+        assert response.status_code == 400
+        assert response.json()["scimType"] == "invalidPath"
+
 
 # ---------------------------------------------------------------------------
 # Auditing

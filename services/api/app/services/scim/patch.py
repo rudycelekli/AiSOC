@@ -144,14 +144,25 @@ def _normalise_path(path: Any) -> tuple[str | None, str | None]:
         stripped = tail or stripped
 
     if "[" in stripped:
-        # A filter this module does not implement. Refusing is correct:
-        # applying the unfiltered attribute would act on more than the
-        # provider asked for, and on `members` that means removing every
-        # member when one was named.
-        raise ScimPatchError(
-            f"unsupported PATCH path filter {path!r}",
-            scim_type="invalidPath",
-        )
+        if stripped.casefold().startswith("members"):
+            # A member filter this module does not implement. Refusing is
+            # correct: applying the unfiltered attribute would act on more
+            # than the provider asked for, which on `members` means removing
+            # every member when one was named.
+            raise ScimPatchError(
+                f"unsupported PATCH path filter {path!r}",
+                scim_type="invalidPath",
+            )
+        # A filtered path on any other multi-valued attribute --
+        # `emails[type eq "work"].value`, `phoneNumbers[type eq "mobile"]
+        # .value` -- is how Entra addresses them in an ordinary attribute
+        # sync. Nothing here stores those attributes, so the whole path is
+        # returned as the attribute: no handler matches it, it is recorded as
+        # ignored like any other unstored attribute, and the rest of the body
+        # (a deactivation, say) still applies. Refusing it failed the whole
+        # PATCH, and a provider that keeps getting 400s quarantines the
+        # provisioning job, which stops deprovisioning for everybody.
+        return stripped.casefold(), None
 
     return stripped.casefold(), None
 
