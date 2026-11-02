@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.deps import AuthUser, DBSession, require_permission
@@ -862,6 +862,16 @@ async def list_alerts(
         filters.append(Alert.category == category)
     if assigned_to_me:
         filters.append(Alert.assigned_to_id == current_user.user_id)
+    if search and search.strip():
+        # Declared from the start and never read, so `?search=` returned the
+        # whole tenant under a 200 -- and the MCP server's
+        # `aisoc_list_alerts` documents it as a substring match on title and
+        # description, so an agent searching for one thing was handed every
+        # alert as the answer. LIKE metacharacters are escaped so the term is
+        # matched literally.
+        term = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{term}%"
+        filters.append(or_(Alert.title.ilike(pattern, escape="\\"), Alert.description.ilike(pattern, escape="\\")))
     if min_confidence is not None:
         filters.append(Alert.confidence >= min_confidence)
     if confidence_label is not None:

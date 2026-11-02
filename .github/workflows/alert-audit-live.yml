@@ -99,6 +99,7 @@ jobs:
         working-directory: services/api
         run: |
           python -m pytest \
+            tests/test_alert_list_search_is_applied.py \
             tests/test_alert_patch_records_what_changed.py \
             tests/test_bootstrap_admin_is_audited.py \
             tests/test_alert_list_limit_is_not_silently_ignored.py \
