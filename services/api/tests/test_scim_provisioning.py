@@ -431,6 +431,27 @@ class TestFiltering:
         assert response.status_code == 400
         assert response.json()["scimType"] == "invalidFilter"
 
+    async def test_an_address_with_an_apostrophe_can_be_looked_up(self, client):
+        """`o'brien@example.com` is an ordinary address. The value pattern
+        excluded both quote characters whichever one delimited the value, so
+        the provider's pre-create lookup was refused with `invalidFilter`."""
+        body = {**OKTA_CREATE_USER, "userName": "o'brien@example.com", "externalId": "00u-obrien"}
+        assert (await client.post(f"{BASE}/Users", json=body)).status_code == 201
+
+        found = await client.get(f"{BASE}/Users", params={"filter": 'userName eq "o\'brien@example.com"'})
+
+        assert found.status_code == 200
+        assert found.json()["totalResults"] == 1
+        assert found.json()["Resources"][0]["userName"] == "o'brien@example.com"
+
+    async def test_a_quote_cannot_end_the_value_early(self, client):
+        """Allowing the other quote style inside a value must not let a
+        value close and a second condition follow it unparsed."""
+        await client.post(f"{BASE}/Users", json=OKTA_CREATE_USER)
+        response = await client.get(f"{BASE}/Users", params={"filter": 'userName eq "ada@example.com" or userName eq "x"'})
+        assert response.status_code == 400
+        assert response.json()["scimType"] == "invalidFilter"
+
     async def test_username_matching_ignores_case(self, client):
         """Providers do not guarantee address casing is stable between syncs."""
         await client.post(f"{BASE}/Users", json=OKTA_CREATE_USER)

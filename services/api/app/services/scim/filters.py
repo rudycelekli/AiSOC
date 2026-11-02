@@ -28,10 +28,18 @@ from typing import Final
 #: ``attribute eq "value"``, tolerating either quote style and extra spaces.
 #: Anchored at both ends, so a filter with a trailing ``and ...`` does not
 #: match a prefix of itself and lose the second condition.
+#:
+#: Each quote style excludes only its own quote. A single character class
+#: excluding both used to refuse ``userName eq "o'brien@example.com"``, an
+#: ordinary address, with ``invalidFilter`` -- and that lookup is what a
+#: provider runs before every create. A double-quoted value is a JSON
+#: string (RFC 7644 3.4.2.2), so ``\"`` and ``\\`` inside it are escapes.
 _EQ = re.compile(
-    r"""^\s*(?P<attr>[A-Za-z][A-Za-z0-9_.:]*)\s+eq\s+["'](?P<value>[^"']*)["']\s*$""",
+    r"""^\s*(?P<attr>[A-Za-z][A-Za-z0-9_.:]*)\s+eq\s+(?:"(?P<dq>(?:[^"\\]|\\.)*)"|'(?P<sq>[^']*)')\s*$""",
     re.IGNORECASE,
 )
+
+_JSON_ESCAPE = re.compile(r"\\(.)")
 
 #: Attributes a caller may filter on, mapped to the canonical name handlers
 #: switch on. Keyed case-folded because SCIM attribute names are
@@ -96,4 +104,6 @@ def parse_equality(raw: str | None, allowed: dict[str, str]) -> EqualityFilter |
     if canonical is None:
         raise ScimFilterError(f"filtering on {match.group('attr')!r} is not supported; supported: {sorted(allowed)}")
 
-    return EqualityFilter(attribute=canonical, value=match.group("value"))
+    double_quoted = match.group("dq")
+    value = _JSON_ESCAPE.sub(r"\1", double_quoted) if double_quoted is not None else match.group("sq")
+    return EqualityFilter(attribute=canonical, value=value)
