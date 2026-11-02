@@ -26,6 +26,11 @@ from app.connectors.base import (
 
 logger = structlog.get_logger()
 
+_PER_PAGE = 200
+# Bound on pages per poll so a cursor that never runs out cannot loop
+# forever.
+_MAX_PAGES = 50
+
 
 class SlackAuditConnector(BaseConnector):
     """Slack Enterprise Grid Audit Logs."""
@@ -99,25 +104,41 @@ class SlackAuditConnector(BaseConnector):
 
     async def fetch_alerts(self, since_seconds: int = 300) -> list[dict[str, Any]]:
         oldest = int((datetime.now(UTC) - timedelta(seconds=since_seconds)).timestamp())
+        params: dict[str, Any] = {"oldest": oldest, "limit": _PER_PAGE}
+        items: list[dict[str, Any]] = []
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(
-                    f"{self._base}/logs",
-                    headers=self._headers(),
-                    params={"oldest": oldest, "limit": 200},
-                )
-                if resp.status_code != 200:
-                    logger.warning(
-                        "slack_audit.fetch_failed",
-                        status=resp.status_code,
-                        body=resp.text[:300],
+                # /logs is cursor-paginated. Reading only the first page
+                # dropped every audit entry past the 200th in a poll window,
+                # and the next poll's window starts later, so those entries
+                # were never read.
+                for _ in range(_MAX_PAGES):
+                    resp = await client.get(
+                        f"{self._base}/logs",
+                        headers=self._headers(),
+                        params=params,
                     )
-                    return []
-                items = (resp.json() or {}).get("entries") or []
-                return [self.normalize(i) for i in items]
+                    if resp.status_code != 200:
+                        logger.warning(
+                            "slack_audit.fetch_failed",
+                            status=resp.status_code,
+                            body=resp.text[:300],
+                        )
+                        if not items:
+                            return []
+                        break
+                    body = resp.json() or {}
+                    items.extend(body.get("entries") or [])
+                    cursor = (body.get("response_metadata") or {}).get("next_cursor")
+                    if not cursor:
+                        break
+                    params["cursor"] = cursor
+                else:
+                    logger.warning("slack_audit.fetch_page_cap_reached", pages=_MAX_PAGES, entries=len(items))
         except Exception as exc:
             logger.warning("slack_audit.fetch_exception", error=str(exc))
             return []
+        return [self.normalize(i) for i in items]
 
     #: Actions that are a compromise or a control being removed, not routine
     #: workspace traffic. Slack's audit-log action reference is the source;
