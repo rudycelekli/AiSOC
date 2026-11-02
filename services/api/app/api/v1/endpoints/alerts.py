@@ -895,9 +895,12 @@ async def list_alerts(
     # page, which capped them at `page_size`.
     facets = await _alert_facets(db, current_user.tenant_id, filters)
 
-    # Fetch. `created_at` is always the final key so the order is total and
-    # paging cannot repeat or skip a row.
-    order_by = [Alert.created_at.desc()]
+    # Fetch. `id` is always the final key so the order is total and paging
+    # cannot repeat or skip a row. `created_at` alone is not: it defaults to
+    # NOW(), the transaction start, so a whole fusion batch shares one value,
+    # and PostgreSQL returns tied rows in a different order for each
+    # OFFSET/LIMIT window.
+    order_by = [Alert.created_at.desc(), Alert.id.asc()]
     if sort == "priority":
         order_by.insert(0, severity_rank_expr().asc())
 

@@ -623,7 +623,10 @@ async def build_queue(
         await db.execute(
             select(Alert, bucket_expr.label("_bucket"), sla_expr.label("_sla_due"))
             .where(where_clause)
-            .order_by(bucket_expr.asc(), sla_expr.asc(), severity_rank.asc())
+            # `id` last so the order is total: a batch of alerts tied on
+            # bucket, SLA and severity otherwise comes back in a different
+            # order per OFFSET window, repeating some and skipping others.
+            .order_by(bucket_expr.asc(), sla_expr.asc(), severity_rank.asc(), Alert.id.asc())
             .offset(offset)
             .limit(page_size)
         )
