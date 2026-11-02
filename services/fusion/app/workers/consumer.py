@@ -27,7 +27,7 @@ from app.services.fusion_engine import FusionEngine
 from app.services.lake_writer import LakeWriter
 from app.services.promoter import promote_normalized_event
 from app.services.scale_hint import compute as compute_scale_hint
-from app.services.sessions import DERIVED_IDLE_SECONDS, SessionRef, SessionStore
+from app.services.sessions import DERIVED_IDLE_SECONDS, SessionRef, SessionStore, event_body
 from app.services.tenant_overlay import OverlayCache
 from app.services.ueba_signal import UebaSignalCache
 from app.services.weak_signals import build_alert as weak_signal_alert
@@ -803,7 +803,7 @@ class FusionWorker:
                     # id as the Postgres row and the graph node, which is what
                     # lets a hunt join the three without any of them having
                     # agreed on anything at write time.
-                    payload["activity"]["session"]["id"] = str(session.id)
+                    event_body(payload)["activity"]["session"]["id"] = str(session.id)
 
             # Phase A1 — archive EVERY normalized event into the ClickHouse lake
             # first, independent of the promotion decision below. A non-promoted

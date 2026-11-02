@@ -215,7 +215,8 @@ class SessionStore:
         session, for an event with no principal, address and client to derive
         one from, genuinely has no session, and saying so is the point.
         """
-        block = _session_block(payload)
+        event = event_body(payload)
+        block = _session_block(event)
         if block is None:
             return None
 
@@ -230,9 +231,9 @@ class SessionStore:
                 logger.warning("fusion.session.unknown_key_kind", extra={"key_kind": kind})
             return None
 
-        source = _source_of(payload)
+        source = _source_of(event)
         sid = session_id(tenant_id, source, key)
-        seen_at = _event_time(payload)
+        seen_at = _event_time(event)
         ref = SessionRef(
             id=sid,
             key=key,
@@ -257,8 +258,8 @@ class SessionStore:
                     ref.originating_human,
                     ref.originating_human_source,
                     seen_at,
-                    _json_list(_actor_kind(payload)),
-                    _json_list(_source_ip(payload)),
+                    _json_list(_actor_kind(event)),
+                    _json_list(_source_ip(event)),
                 )
                 issued = block.get("issued")
                 if isinstance(issued, dict):
@@ -338,6 +339,19 @@ class SessionStore:
         except Exception as exc:  # noqa: BLE001 — same reasoning as record_event
             logger.error("fusion.session.close_idle_failed", extra={"error": str(exc)}, exc_info=True)
             return 0
+
+
+def event_body(payload: dict[str, Any]) -> dict[str, Any]:
+    """The OCSF event a raw-events message carries.
+
+    Ingest publishes a `NormalizedEvent` envelope -- `{id, connector_id,
+    tenant_id, ocsf_event, ...}` -- and the activity projection, `time`,
+    `metadata` and `src_endpoint` all live inside `ocsf_event`. Reading them
+    off the envelope found nothing, so no live event ever recorded a session.
+    A bare OCSF body is accepted as itself.
+    """
+    inner = payload.get("ocsf_event")
+    return inner if isinstance(inner, dict) else payload
 
 
 def _session_block(payload: dict[str, Any]) -> dict[str, Any] | None:

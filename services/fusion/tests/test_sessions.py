@@ -383,3 +383,32 @@ def test_the_sweep_period_is_shorter_than_the_window_it_sweeps_for():
     from app.workers.consumer import SESSION_SWEEP_SECONDS
 
     assert 0 < SESSION_SWEEP_SECONDS <= DERIVED_IDLE_SECONDS / 2
+
+
+@pytest.mark.asyncio
+async def test_the_consumer_records_the_session_of_a_message_as_ingest_publishes_it():
+    """Ingest publishes a `NormalizedEvent` envelope, `{id, connector_id,
+    tenant_id, ocsf_event, normalization_version}`, and the activity
+    projection lives inside `ocsf_event`. The store read it off the envelope,
+    found no `activity`, and recorded no session for any live event, while
+    every test above passed it the bare OCSF body."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.core.config import settings
+    from app.workers.consumer import FusionWorker
+
+    conn = RecordingConn()
+    worker = FusionWorker(engine=SimpleNamespace(process=AsyncMock()), sessions=SessionStore(RecordingPool(conn)))
+    ocsf = event({"key": "ASIAIOSFODNN7EXAMPLE", "key_kind": "vendor_credential", "key_source": "userIdentity.accessKeyId"})
+    ocsf.update({"class_uid": 3002, "severity_id": 1, "tenant_uid": TENANT, "event_id": "evt-1"})
+    message = {"id": "evt-1", "connector_id": "c-1", "tenant_id": TENANT, "normalization_version": "1.0", "ocsf_event": ocsf}
+
+    await worker._process_message(message, topic=settings.kafka_topic_raw_events, partition=0, offset=1)
+
+    _, args = conn.sql_containing("INSERT INTO sessions")
+    expected = session_id(TENANT, "aws_cloudtrail", "ASIAIOSFODNN7EXAMPLE")
+    assert args[0] == expected
+    # Stamped where the lake writer reads it, so the lake row carries the
+    # same session id as the Postgres row.
+    assert message["ocsf_event"]["activity"]["session"]["id"] == str(expected)
