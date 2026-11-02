@@ -54571,7 +54571,7 @@
       "enabled": true,
       "executable": true,
       "path": "detections/identity/account-creation-by-non-admin.yaml",
-      "sha256": "b49da92b7d85348ea292bf9b60df0878f0275b61f6e41563dd72b782f9731509"
+      "sha256": "1318f9ececaac143ea4f6b79aa3ad2b44887db03e6d5af65530fb2ce8a381e1d"
     },
     {
       "id": "det-identity-027",

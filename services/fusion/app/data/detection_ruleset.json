@@ -15167,10 +15167,7 @@
       "category": "identity",
       "id": "det-identity-026",
       "match_when": {
-        "actor_role_not_in": [
-          "admin",
-          "user_admin"
-        ],
+        "actor_is_admin": false,
         "event_type": "user.lifecycle.create"
       },
       "mitre": [

@@ -903,12 +903,18 @@ IDENTITY: list[dict] = [
         "severity": "high",
         "mitre": ["t1136.001"],
         "log_source": {"product": "okta", "service": "system-log"},
-        "fields": {"event_type", "actor_role"},
-        "match_when": {"event_type": "user.lifecycle.create", "actor_role_not_in": ["admin", "user_admin"]},
+        # `actor_role` is emitted by no connector, and `not_in` is true on a
+        # missing field, so the old `actor_role_not_in` clause fired on every
+        # `user.lifecycle.create` whoever performed it. `actor_is_admin` is
+        # resolved per tenant from imported identities and is absent for an
+        # unknown actor, so the rule stays silent rather than calling an
+        # administrator a non-admin.
+        "fields": {"event_type", "actor_is_admin"},
+        "match_when": {"event_type": "user.lifecycle.create", "actor_is_admin": False},
         "fp": ["Self-service guest invite (must require sponsor)"],
         "playbook": "tpl-privilege-escalation",
-        "positive": {"event_type": "user.lifecycle.create", "actor_role": "engineer", "actor": "user@corp.com"},
-        "negative": {"event_type": "user.lifecycle.create", "actor_role": "admin", "actor": "admin@corp.com"},
+        "positive": {"event_type": "user.lifecycle.create", "actor_is_admin": False, "actor": "user@corp.com"},
+        "negative": {"event_type": "user.lifecycle.create", "actor_is_admin": True, "actor": "admin@corp.com"},
     },
     {
         "slug": "admin-account-deletion",

@@ -1,5 +1,5 @@
 {
   "actor": "user@corp.com",
-  "actor_role": "engineer",
+  "actor_is_admin": false,
   "event_type": "user.lifecycle.create"
 }
