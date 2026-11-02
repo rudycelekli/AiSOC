@@ -197,3 +197,54 @@ async def test_an_event_with_no_time_falls_back_to_arrival() -> None:
 
     assert not await engine.evaluate(untimed("failure"))
     assert [h.rule_id for h in await engine.evaluate(untimed("success"))] == [SPRAY_THEN_SUCCESS.id]
+
+
+@pytest.mark.asyncio
+async def test_one_event_delivered_twice_cannot_advance_two_stages() -> None:
+    """Kafka delivers at least once, and the consumer re-delivers on a failed
+    persist. A second delivery of the same event is not a second event, so an
+    event that matches both stages must not complete the sequence by being
+    read twice."""
+    overlapping = SequenceRule(
+        id="wd-seq-test-overlap-redelivered",
+        name="overlap",
+        severity="low",
+        category="identity",
+        mitre=[],
+        sequence=({"event_type": "authentication"}, {"event_type": "authentication"}),
+        group_by="user",
+        window_seconds=600,
+    )
+    engine = WindowedDetectionEngine(FakeRedis(), rules=(), sequences=(overlapping,))
+    tenant = str(uuid4())
+    event = _event(tenant, "success", 1000.0)
+    assert not await engine.evaluate(event, event_id="evt-1")
+    assert not await engine.evaluate(event, event_id="evt-1")
+
+
+@pytest.mark.asyncio
+async def test_a_redelivered_okta_mfa_sign_in_does_not_fire_the_shipped_aitm_sequence() -> None:
+    """The shipped `wd-aitm-mfa-then-session-from-new-asn` has two stages one
+    Okta MFA sign-in satisfies on its own (`mfa_satisfied: true`, and a
+    session id). Delivered twice, that one sign-in raised the critical."""
+    from app.services.windowed_detection import load_sequence_rules
+
+    engine = WindowedDetectionEngine(FakeRedis(), rules=(), sequences=load_sequence_rules())
+    tenant = str(uuid4())
+    published = "2026-11-01T10:00:00.000Z"
+    # The keys OktaConnector.normalize() sets for a successful MFA sign-in.
+    normalised = {
+        "source": "okta",
+        "external_id": "okta-evt-1",
+        "actor_email": "alice@example.com",
+        "event_type": "user.session.start",
+        "outcome": "SUCCESS",
+        "session_id": "102AbCdEfGh",
+        "mfa_satisfied": True,
+        "raw_event": {"uuid": "okta-evt-1", "published": published, "eventType": "user.session.start"},
+        "created_at": published,
+    }
+    message = {"tenant_id": tenant, "ocsf_event": {"tenant_uid": tenant, "time": published, "raw_data": json.dumps(normalised)}}
+    for _ in range(2):
+        hits = await engine.evaluate(message, event_id="ingest-evt-1")
+        assert "wd-aitm-mfa-then-session-from-new-asn" not in {h.rule_id for h in hits}

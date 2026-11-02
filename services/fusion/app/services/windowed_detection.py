@@ -652,7 +652,14 @@ class WindowedDetectionEngine:
             # stages satisfied by the *same* event can never be mistaken for
             # two events. Timestamps alone cannot carry that: two genuinely
             # distinct events routinely share a second.
-            token = uuid.uuid4().hex
+            #
+            # The token is the event's identity, not a fresh uuid4. A random
+            # token made each *delivery* a new event, so one event matching
+            # two stages, delivered twice (Kafka is at-least-once, and the
+            # consumer retries on a failed persist), chained to itself and
+            # completed the sequence. The threshold members had the same
+            # defect and the same fix.
+            token = identity
             for sequence in self._sequences:
                 try:
                     hit = await self._advance_sequence(sequence, tenant, fields, now, token)
