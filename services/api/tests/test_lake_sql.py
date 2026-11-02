@@ -366,6 +366,31 @@ def test_explicit_row_cap_respected() -> None:
     assert "limit 50" in result.sql.lower()
 
 
+def test_limit_by_is_not_mistaken_for_a_smaller_row_limit() -> None:
+    """ClickHouse ``LIMIT n BY col`` keeps n rows *per value of col*.
+
+    Its ``n`` used to be read as the caller's own smaller LIMIT, so the
+    query went out with no row cap at all while the response still reported
+    ``row_cap``.
+    """
+    sql = "SELECT src_ip, event_time FROM aisoc.raw_events ORDER BY event_time DESC LIMIT 1 BY src_ip"
+    result = rewrite_for_tenant(sql, TENANT_ID, row_cap=100)
+    rendered = result.sql.lower()
+    assert "limit 1 by src_ip" in rendered
+    assert rendered.rstrip().endswith("limit 100")
+
+
+def test_a_large_limit_by_keeps_its_by_clause() -> None:
+    """Above the cap, the old clamp replaced ``LIMIT 5000 BY src_ip`` with a
+    plain ``LIMIT 100`` -- a different query, returned without a word."""
+    sql = "SELECT src_ip FROM aisoc.raw_events LIMIT 5000 BY src_ip"
+    result = rewrite_for_tenant(sql, TENANT_ID, row_cap=100)
+    rendered = result.sql.lower()
+    assert "limit 5000 by src_ip" in rendered
+    assert rendered.rstrip().endswith("limit 100")
+    assert f"tenant_id = '{TENANT_ID}'" in rendered
+
+
 def test_row_cap_clamped_to_max() -> None:
     """A caller-supplied cap above MAX_ROW_CAP is reduced."""
     result = rewrite_for_tenant(

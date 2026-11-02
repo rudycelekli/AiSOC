@@ -243,7 +243,7 @@ def rewrite_for_tenant(
         _validate_and_rewrite_select(select, tenant_id, cte_aliases, referenced)
 
     # ── Step 5: clamp the outer LIMIT ────────────────────────────────
-    _clamp_outer_limit(root, effective_cap)
+    tree = _clamp_outer_limit(root, effective_cap, tree)
 
     rewritten = tree.sql(dialect="clickhouse")
 
@@ -547,8 +547,8 @@ def _qualified_name(table: exp.Table) -> str:
     return f"{db}.{name}"
 
 
-def _clamp_outer_limit(node: exp.Expression, cap: int) -> None:
-    """Force the outer query to honour a row cap.
+def _clamp_outer_limit(node: exp.Expression, cap: int, tree: exp.Expression) -> exp.Expression:
+    """Force the outer query to honour a row cap, and return the statement.
 
     For ``WITH … SELECT …`` we apply the limit to the underlying SELECT
     inside the CTE wrapper. For ``UNION`` we apply it to the union
@@ -557,6 +557,15 @@ def _clamp_outer_limit(node: exp.Expression, cap: int) -> None:
     If the caller already specified a smaller LIMIT we keep it (no point
     in expanding their request). If their LIMIT is larger or absent we
     replace it with the cap.
+
+    ClickHouse's ``LIMIT n BY col`` is not a row limit: it keeps ``n`` rows
+    *per value of col*, and sqlglot holds it in the same ``limit`` slot
+    (with the ``BY`` columns in ``expressions``). Reading its ``n`` as the
+    caller's own smaller limit left the query uncapped, and replacing it
+    with the cap silently dropped the ``BY``. Such a query is wrapped
+    instead, so the per-group limit stands and the cap applies to the
+    result. ``tree`` is the parsed statement; the return value is what to
+    render, which differs from it only when the root itself was wrapped.
     """
     target: exp.Expression = node
     if isinstance(node, exp.With) and isinstance(node.this, exp.Select | exp.Union):
@@ -566,9 +575,16 @@ def _clamp_outer_limit(node: exp.Expression, cap: int) -> None:
         # Defensive: caller already validated the root, but if a future
         # expansion misses a case we'd rather leave the SQL alone than
         # corrupt it.
-        return
+        return tree
 
     existing = target.args.get("limit")
+    if existing is not None and existing.args.get("expressions"):
+        capped = exp.select("*").from_(target.copy().subquery("_aisoc_capped")).limit(cap)
+        if target is tree:
+            return capped
+        target.replace(capped)
+        return tree
+
     if existing is not None:
         # Try to read the current limit literal; if it's an expression
         # (rare — most ClickHouse SQL uses literal limits) we leave it
@@ -577,6 +593,7 @@ def _clamp_outer_limit(node: exp.Expression, cap: int) -> None:
         if isinstance(current, exp.Literal) and current.is_int:
             current_value = int(current.this)
             if current_value <= cap:
-                return  # caller asked for fewer rows; keep their value
+                return tree  # caller asked for fewer rows; keep their value
 
     target.set("limit", exp.Limit(expression=exp.Literal.number(cap)))
+    return tree
