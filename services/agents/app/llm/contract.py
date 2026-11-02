@@ -214,7 +214,11 @@ async def safe_ainvoke(llm: Any, messages: Iterable[Any], **kwargs: Any) -> Any:
 
     if use_cache:
         content = getattr(result, "content", None)
-        if isinstance(content, str) and content:
+        # The cache holds text and replays it as a bare ``AIMessage``. A
+        # response that also asked for tool calls cannot be replayed that way:
+        # the hit would drop the calls, and the tool loop would take the
+        # model's preamble for its final answer without running a tool.
+        if isinstance(content, str) and content and not getattr(result, "tool_calls", None):
             _RESPONSE_CACHE.store(model=model, prompt=prompt, user_input=user_input, response=content)
     return result
 
