@@ -83,7 +83,11 @@ SKIP_SUFFIXES = (
     ".onnx",
     ".parquet",
 )
-SKIP_DIRS = ("node_modules/", ".git/", "dist/", "build/", ".next/", "vendor/")
+#: Directory *names*, matched against whole path components. A substring test
+#: on `vendor/` also matched `_vendor/`, so the first-party vendored mirrors
+#: and their hand-written `VENDORED*.md` notes were counted as scanned and
+#: never opened.
+SKIP_DIRS = frozenset({"node_modules", ".git", "dist", "build", ".next", "vendor"})
 
 
 def _load_patterns(path: Path) -> list[re.Pattern]:
@@ -130,7 +134,7 @@ def _git(*args: str) -> str:
 
 
 def _skip(rel: str) -> bool:
-    return rel in SELF_REFERENTIAL or rel.endswith(SKIP_SUFFIXES) or any(d in rel for d in SKIP_DIRS)
+    return rel in SELF_REFERENTIAL or rel.endswith(SKIP_SUFFIXES) or not SKIP_DIRS.isdisjoint(rel.split("/")[:-1])
 
 
 def scan_files(paths: list[str]) -> list[tuple[str, int, str]]:
@@ -201,6 +205,15 @@ def self_test() -> int:
                 failures.append(f"hook STRIPPED known-good line: {s!r}")
     else:
         failures.append(f"hook not found at {HOOK} — cannot cross-check")
+
+    # Direction 5 — the skip list must exclude the directories it names and
+    # nothing that merely contains one of those names.
+    for rel in ("web/node_modules/x.js", "packages/sdk/dist/index.js", "vendor/lib.go"):
+        if not _skip(rel):
+            failures.append(f"skip list did NOT exclude {rel!r}")
+    for rel in ("services/api/app/_vendor/VENDORED.md", "docs/rebuild/notes.md"):
+        if _skip(rel):
+            failures.append(f"skip list excluded first-party path {rel!r}")
 
     if failures:
         print("SELF-TEST FAILED")

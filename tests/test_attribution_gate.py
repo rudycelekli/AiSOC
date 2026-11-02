@@ -147,3 +147,28 @@ def test_gate_passes_a_clean_text_file(tmp_path: Path) -> None:
         cwd=_REPO,
     )
     assert r.returncode == 0, f"gate flagged a clean body:\n{r.stdout}"
+
+
+def test_a_vendored_first_party_file_is_scanned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_vendor/` is first-party code and prose, not a third-party tree.
+
+    A substring test on `vendor/` skipped it, so `--all` and `--diff-base`
+    counted `services/api/app/_vendor/**` as scanned without opening it.
+    """
+    rel = "services/api/app/_vendor/VENDORED.md"
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True)
+    target.write_text(f"# Vendored copies\n\n{_CORPUS['bad'][0]}\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    assert [hit[0] for hit in gate.scan_files([rel])] == [rel]
+
+
+def test_a_third_party_vendor_tree_is_still_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rel = "services/x/vendor/github.com/lib/README.md"
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True)
+    target.write_text(f"{_CORPUS['bad'][0]}\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    assert gate.scan_files([rel]) == []
