@@ -54,7 +54,11 @@ DEFAULT_BUSINESS_END_HOUR = 18
 #: Timestamp fields, in the order they are trusted. `event_time` is when the
 #: thing happened; `ingest_time` is when we heard about it, and using the
 #: latter would make a batch import at 03:00 look like a night-time attack.
-_TIME_FIELDS = ("event_time", "timestamp", "time", "@timestamp", "ingest_time")
+#: `created_at` is where most connectors' `normalize()` puts the vendor's own
+#: event time (Okta `published`, Entra `activityDateTime`, CloudTrail
+#: `eventTime`); without it those events had no time here, and the windowed
+#: engine counted them by arrival.
+_TIME_FIELDS = ("event_time", "timestamp", "time", "@timestamp", "created_at", "ingest_time")
 
 
 def parse_event_time(event: dict[str, Any]) -> datetime | None:

@@ -354,3 +354,51 @@ async def test_a_confirmed_hit_survives_a_second_evaluation_pass_over_the_window
 
     assert replay == [], "replaying the window must be idempotent"
     assert time.time() > 0  # the verdict must not depend on the wall clock
+
+
+def _okta_sign_in_failure(tenant: str, published: str, n: int) -> dict:
+    """What `OktaConnector.normalize()` emits for a failed sign-in: the
+    vendor's event time is on `created_at` (from `published`), and nothing
+    in the dict is named `event_time` or `timestamp`."""
+    normalised = {
+        "source": "okta",
+        "external_id": f"okta-{n}",
+        "actor_email": "alice@example.com",
+        "src_ip": "203.0.113.42",
+        "event_type": "user.session.start",
+        "outcome": "FAILURE",
+        "raw_event": {"uuid": f"okta-{n}", "published": published, "eventType": "user.session.start"},
+        "created_at": published,
+    }
+    return {"tenant_id": tenant, "ocsf_event": {"tenant_uid": tenant, "time": published, "raw_data": json.dumps(normalised)}}
+
+
+@pytest.mark.asyncio
+async def test_a_connector_that_stamps_created_at_is_windowed_in_event_time():
+    """An Okta catch-up poll after an outage: 21 failed sign-ins an hour
+    apart, all arriving at once. The shipped `wd-brute-force-login` is 21
+    failures in 600 s; counted by arrival, the backlog was a burst."""
+    from app.services.windowed_detection import load_window_rules
+
+    engine = WindowedDetectionEngine(FakeRedis(), rules=load_window_rules())
+    tenant = str(uuid4())
+
+    hits = []
+    for n in range(21):
+        hits += await engine.evaluate(_okta_sign_in_failure(tenant, f"2026-10-27T{n:02d}:00:00.000Z", n), event_id=f"okta-{n}")
+
+    assert "wd-brute-force-login" not in {h.rule_id for h in hits}
+
+
+@pytest.mark.asyncio
+async def test_a_real_created_at_burst_still_fires():
+    from app.services.windowed_detection import load_window_rules
+
+    engine = WindowedDetectionEngine(FakeRedis(), rules=load_window_rules())
+    tenant = str(uuid4())
+
+    hits = []
+    for n in range(21):
+        hits += await engine.evaluate(_okta_sign_in_failure(tenant, f"2026-10-27T12:00:{n:02d}.000Z", n), event_id=f"okta-{n}")
+
+    assert "wd-brute-force-login" in {h.rule_id for h in hits}

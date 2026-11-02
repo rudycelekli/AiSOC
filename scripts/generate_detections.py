@@ -586,7 +586,7 @@ _COMPARISON_RE = re.compile(r"^(?P<left>.+?)_(?P<op>eq|neq)_(?P<right>.+)$")
 DEFAULT_BUSINESS_START_HOUR = 8
 DEFAULT_BUSINESS_END_HOUR = 18
 
-_TIME_FIELDS = ("event_time", "timestamp", "time", "@timestamp", "ingest_time")
+_TIME_FIELDS = ("event_time", "timestamp", "time", "@timestamp", "created_at", "ingest_time")
 
 
 def _parse_event_time(event: dict[str, Any]) -> datetime | None:

@@ -122,6 +122,11 @@ class TestTimeOfDay:
         )
         assert result["is_business_hours"] is True
 
+    def test_a_connectors_created_at_is_the_event_time(self) -> None:
+        """Most connectors put the vendor's event time on `created_at`."""
+        result = time_of_day_fields({"created_at": "2026-09-22T03:00:00Z", "ingest_time": "2026-09-22T14:00:00Z"})
+        assert result["is_business_hours"] is False
+
     def test_iso_strings_parse(self) -> None:
         result = time_of_day_fields({"event_time": "2026-09-22T14:00:00Z"})
         assert result["is_business_hours"] is True
