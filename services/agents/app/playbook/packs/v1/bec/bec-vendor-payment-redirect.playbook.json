@@ -62,17 +62,16 @@
     {
       "id": "approve",
       "name": "Wait for human approval",
-      "type": "condition",
-      "params": {},
-      "on_failure": "continue",
-      "retry_max": 0,
-      "timeout_seconds": 5,
-      "condition": {
-        "field": "context.approved_by_oncall",
-        "operator": "eq",
-        "value": true
+      "type": "approval",
+      "params": {
+        "message": "Release frozen payment {{alert.payment_id}}? It was held after a vendor banking-detail change.",
+        "approvers": [
+          "soc-lead"
+        ]
       },
-      "next_true": "release"
+      "on_failure": "abort",
+      "retry_max": 0,
+      "timeout_seconds": 5
     },
     {
       "id": "release",
