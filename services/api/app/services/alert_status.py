@@ -22,8 +22,9 @@ that migration 083 spent an entire release untangling.
 
 The vocabulary
 --------------
-`models/alert.py` documents `new | triaging | in_progress | resolved`, and
-`closed` appears in the wild from vendor writeback. Both terminal states are
+`models/alert.py` documents `new | triaging | in_progress | resolved`,
+`closed` appears in the wild from vendor writeback, and `false_positive` is
+written by the console's own close paths. All three terminal states are
 listed here, because treating an unrecognised value as resolved would hide
 work rather than show it -- the safer default for a *queue* count is to
 include what you cannot classify.
@@ -38,7 +39,10 @@ UNRESOLVED_STATUSES: Final[tuple[str, ...]] = ("new", "triaging", "in_progress")
 
 #: Finished. Separate from the above rather than derived, so a new status
 #: added to the model does not silently become "resolved" by omission.
-RESOLVED_STATUSES: Final[tuple[str, ...]] = ("resolved", "closed")
+#: `false_positive` is a close target `PATCH /alerts/{id}` and bulk-close
+#: both write (with `resolved_at` set). Missing here, a false-positive close
+#: stayed in the list's unresolved facet and in neither dashboard bucket.
+RESOLVED_STATUSES: Final[tuple[str, ...]] = ("resolved", "closed", "false_positive")
 
 
 def is_unresolved(status: str | None) -> bool:

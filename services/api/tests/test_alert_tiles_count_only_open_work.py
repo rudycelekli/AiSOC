@@ -161,6 +161,20 @@ class TestTheActiveTileCountsOnlyOpenWork:
         assert counts["resolved"] == 2
         assert counts["open"] == 1
 
+    async def test_a_false_positive_close_is_resolved_work(self, db) -> None:
+        """`false_positive` is a close the API itself offers (PATCH and
+        bulk-close both write it, with `resolved_at`). It was in neither
+        list, so a queue triaged to false positives showed in no tile."""
+        from app.api.v1.endpoints.metrics import _count_alerts_by_status
+
+        await _seed(db, [("false_positive", "low"), ("false_positive", "critical"), ("new", "medium")])
+
+        counts = await _count_alerts_by_status(db, TENANT)
+
+        assert counts["resolved"] == 2
+        assert counts["open"] == 1
+        assert counts["critical"] == 0
+
     async def test_another_tenants_alerts_are_not_counted(self, db) -> None:
         """Every count here is tenant-scoped, and a regression that dropped
         the predicate would be a cross-tenant read rather than a wrong tile."""
@@ -201,6 +215,14 @@ class TestTheDefinitionIsSharedRatherThanCopied:
         assert is_resolved("resolved") is True
         assert is_resolved("closed") is True
         assert is_resolved("triaging") is False
+
+    def test_a_false_positive_close_is_not_unresolved(self) -> None:
+        """The alert list's `unresolved` facet goes through `is_unresolved`,
+        which counts anything not in the resolved set as open work."""
+        from app.services.alert_status import is_resolved, is_unresolved
+
+        assert is_resolved("false_positive") is True
+        assert is_unresolved("false_positive") is False
 
 
 class TestTheRouteItselfIsIntact:
