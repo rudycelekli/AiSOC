@@ -6,6 +6,7 @@ as an alert stream. Auth is a simple API key header (x-api-key).
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -15,6 +16,11 @@ import structlog
 from app.connectors.base import BaseConnector, Capability, ConnectorSchema, Field
 
 logger = structlog.get_logger()
+
+_PER_PAGE = 200
+# Bound on pages per poll so a search_after token that never runs out cannot
+# loop forever.
+_MAX_PAGES = 50
 
 
 class JumpCloudConnector(BaseConnector):
@@ -54,18 +60,33 @@ class JumpCloudConnector(BaseConnector):
 
     async def fetch_alerts(self, since_seconds: int = 300) -> list[dict[str, Any]]:
         start = (datetime.now(UTC) - timedelta(seconds=max(1, since_seconds))).strftime("%Y-%m-%dT%H:%M:%SZ")
-        body = {"service": ["all"], "start_time": start, "limit": 200, "sort": "DESC"}
+        body: dict[str, Any] = {"service": ["all"], "start_time": start, "limit": _PER_PAGE, "sort": "DESC"}
+        collected: list[Any] = []
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post("https://api.jumpcloud.com/insights/directory/v1/events", headers=self._headers(), json=body)
-                resp.raise_for_status()
-                events = resp.json()
+                # Directory Insights pages with the X-Search_after response
+                # header, sent back as ``search_after``. Reading only the first
+                # page kept the newest 200 events of the window and dropped the
+                # rest; the next poll's window starts later, so those events
+                # were never read.
+                for _ in range(_MAX_PAGES):
+                    resp = await client.post("https://api.jumpcloud.com/insights/directory/v1/events", headers=self._headers(), json=body)
+                    resp.raise_for_status()
+                    events = resp.json()
+                    if not isinstance(events, list):
+                        events = events.get("results", []) if isinstance(events, dict) else []
+                    collected.extend(events)
+                    search_after = resp.headers.get("X-Search_after")
+                    if len(events) < _PER_PAGE or not search_after:
+                        break
+                    body["search_after"] = json.loads(search_after)
+                else:
+                    logger.warning("jumpcloud.fetch_page_cap_reached", pages=_MAX_PAGES, events=len(collected))
         except Exception as exc:
             logger.warning("jumpcloud.fetch_failed", error=str(exc))
-            return []
-        if not isinstance(events, list):
-            events = events.get("results", []) if isinstance(events, dict) else []
-        return [self.normalize(e) for e in events if isinstance(e, dict)]
+            if not collected:
+                return []
+        return [self.normalize(e) for e in collected if isinstance(e, dict)]
 
     def normalize(self, raw: dict[str, Any]) -> dict[str, Any]:
         if isinstance(raw, dict) and "raw_event" in raw and raw.get("source") == self.connector_id:
