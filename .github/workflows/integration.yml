@@ -893,6 +893,22 @@ jobs:
         env:
           MSSP_ISOLATION_REQUIRED: '1'
         run: pip install --quiet structlog pyyaml && python -m pytest tests/test_business_context_tenant_rules_live.py -v --tb=short
+      # The alert list's ordering and its tiles are an `ORDER BY` and a set of
+      # aggregate `WHERE`s, which a fake session cannot judge. All three files
+      # say they run here and none did, so when `list_alerts` gained its
+      # `limit` / `http_request` parameters two of them broke with a
+      # TypeError and nothing noticed.
+      - name: Alert list ordering and tiles (live Postgres)
+        working-directory: services/api
+        env:
+          MSSP_ISOLATION_REQUIRED: '1'
+        run: >-
+          python -m pytest
+          tests/test_alert_list_priority_sort.py
+          tests/test_alert_tiles_cover_the_whole_result_set.py
+          tests/test_alert_tiles_count_only_open_work.py
+          -v --tb=short
+
       # Asset criticality orders the queue: the lower(name)/IP-overlap match,
       # the exploited-and-unremediated KEV filter and the tenant predicate on
       # both resolver queries are schema facts only this job can check. The

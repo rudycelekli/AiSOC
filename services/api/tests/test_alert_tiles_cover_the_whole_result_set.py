@@ -38,6 +38,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from starlette.requests import Request
 
 DSN = os.environ.get("DATABASE_URL", "")
 REQUIRED = os.environ.get("MSSP_ISOLATION_REQUIRED", "").strip() not in ("", "0", "false")
@@ -117,6 +118,12 @@ def _principal(tenant: uuid.UUID):
     )
 
 
+#: The handler reads the raw query string to tell `?limit=` from `?page_size=`,
+#: so a direct call needs a request object; an empty query string is what
+#: the route sees when neither is sent.
+_REQUEST = Request({"type": "http", "method": "GET", "path": "/api/v1/alerts", "query_string": b"", "headers": []})
+
+
 async def _list(db, tenant: uuid.UUID, **overrides):
     """Call the real handler.
 
@@ -133,13 +140,14 @@ async def _list(db, tenant: uuid.UUID, **overrides):
         "status": None,
         "category": None,
         "assigned_to_me": False,
+        "limit": None,
         "search": None,
         "min_confidence": None,
         "confidence_label": None,
         "sort": "newest",
         **overrides,
     }
-    return await list_alerts(current_user=_principal(tenant), db=db, **kwargs)
+    return await list_alerts(current_user=_principal(tenant), db=db, http_request=_REQUEST, **kwargs)
 
 
 # A queue far larger than one page, so a page-local count cannot accidentally
