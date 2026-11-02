@@ -790,6 +790,40 @@ class TestProviderSequences:
         assert response.json()["active"] is False
 
 
+class TestAddressHeldByAnotherTenant:
+    """`users.email` is unique across the database, not per tenant.
+
+    A `userName` that another tenant's principal already holds cannot be
+    written here. It used to reach the INSERT/UPDATE and surface as an
+    `IntegrityError`, a 500 the provider retries forever, instead of the
+    409 `uniqueness` RFC 7644 specifies.
+    """
+
+    async def test_a_create_is_answered_409(self, client, session_factory):
+        await _seed_user(session_factory, email="ada@example.com", tenant=OTHER_TENANT)
+        response = await client.post(f"{BASE}/Users", json=OKTA_CREATE_USER)
+        assert response.status_code == 409
+        assert response.json()["scimType"] == "uniqueness"
+
+    async def test_a_patch_rename_is_answered_409_and_changes_nothing(self, client, session_factory):
+        await _seed_user(session_factory, email="taken@example.com", tenant=OTHER_TENANT)
+        created = await client.post(f"{BASE}/Users", json=OKTA_CREATE_USER)
+        user_id = created.json()["id"]
+        response = await client.patch(
+            f"{BASE}/Users/{user_id}",
+            json={"schemas": [PATCH_SCHEMA], "Operations": [{"op": "replace", "path": "userName", "value": "taken@example.com"}]},
+        )
+        assert response.status_code == 409
+        assert response.json()["scimType"] == "uniqueness"
+        assert (await client.get(f"{BASE}/Users/{user_id}")).json()["userName"] == "ada@example.com"
+
+    async def test_a_put_rename_is_answered_409(self, client, session_factory):
+        await _seed_user(session_factory, email="taken@example.com", tenant=OTHER_TENANT)
+        created = await client.post(f"{BASE}/Users", json=OKTA_CREATE_USER)
+        response = await client.put(f"{BASE}/Users/{created.json()['id']}", json={**OKTA_CREATE_USER, "userName": "taken@example.com"})
+        assert response.status_code == 409
+
+
 # ---------------------------------------------------------------------------
 # Auditing
 # ---------------------------------------------------------------------------

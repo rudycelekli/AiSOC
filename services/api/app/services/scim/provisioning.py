@@ -136,6 +136,18 @@ async def find_user_by_username(db: AsyncSession, tenant_id: uuid.UUID, username
     return result.scalar_one_or_none()
 
 
+async def username_held_by_another_tenant(db: AsyncSession, tenant_id: uuid.UUID, username: str) -> bool:
+    """Whether another tenant's principal already holds this address.
+
+    `users.email` is unique across the whole database, not per tenant, so a
+    `userName` free in this tenant can still be impossible to write. Asked
+    before the write so the provider gets the RFC 7644 409 `uniqueness`
+    instead of an `IntegrityError` surfacing as a 500.
+    """
+    result = await db.execute(select(User.id).where(User.tenant_id != tenant_id, User.email == username.strip()).limit(1))
+    return result.scalar_one_or_none() is not None
+
+
 async def find_user_by_external_id(db: AsyncSession, tenant_id: uuid.UUID, external_id: str) -> User | None:
     """Locate a principal by the identity provider's own identifier."""
     result = await db.execute(

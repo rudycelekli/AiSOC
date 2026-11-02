@@ -428,7 +428,7 @@ async def create_user(body: dict[str, Any], principal: ScimAuth, db: ScimDB, req
     given, family = _extract_names(body)
 
     existing = await provisioning.find_user_by_username(db, principal.tenant_id, user_name)
-    if existing is not None:
+    if existing is not None or await provisioning.username_held_by_another_tenant(db, principal.tenant_id, user_name):
         return _error(status.HTTP_409_CONFLICT, f"userName {user_name!r} already exists", scim_type="uniqueness")
 
     # No password is set. A provisioned principal signs in through the
@@ -502,7 +502,9 @@ async def replace_user(user_id: str, body: dict[str, Any], principal: ScimAuth, 
     user_name = _extract_username(body)
     if user_name and user_name.casefold() != user.email.casefold():
         clash = await provisioning.find_user_by_username(db, principal.tenant_id, user_name)
-        if clash is not None and clash.id != user.id:
+        if (clash is not None and clash.id != user.id) or await provisioning.username_held_by_another_tenant(
+            db, principal.tenant_id, user_name
+        ):
             return _error(status.HTTP_409_CONFLICT, f"userName {user_name!r} already exists", scim_type="uniqueness")
         changes["user_name"] = {"from": user.email, "to": user_name}
         user.email = user_name
@@ -583,7 +585,9 @@ async def patch_user(user_id: str, body: dict[str, Any], principal: ScimAuth, db
             new_name = _string_attr(op.value)
             if new_name and new_name.casefold() != user.email.casefold():
                 clash = await provisioning.find_user_by_username(db, principal.tenant_id, new_name)
-                if clash is not None and clash.id != user.id:
+                if (clash is not None and clash.id != user.id) or await provisioning.username_held_by_another_tenant(
+                    db, principal.tenant_id, new_name
+                ):
                     return _error(status.HTTP_409_CONFLICT, f"userName {new_name!r} already exists", scim_type="uniqueness")
                 changes["user_name"] = {"from": user.email, "to": new_name}
                 user.email = new_name
