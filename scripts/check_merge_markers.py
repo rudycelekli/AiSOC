@@ -73,13 +73,15 @@ SKIP_SUFFIXES: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".gif", ".pdf", ".wof
 
 
 def tracked_files(root: Path) -> list[str]:
+    # NUL-separated: without `-z` git C-quotes a path with a non-ASCII byte,
+    # the quoted string names no file, and the file was skipped unread.
     result = subprocess.run(
-        ["git", "-C", str(root), "ls-files"],
+        ["git", "-C", str(root), "ls-files", "-z"],
         capture_output=True,
         text=True,
         check=False,
     )
-    return [p for p in result.stdout.splitlines() if p]
+    return [p for p in result.stdout.split("\0") if p]
 
 
 def scan(root: Path) -> tuple[list[str], int, int]:

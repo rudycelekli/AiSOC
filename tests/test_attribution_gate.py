@@ -100,6 +100,31 @@ def test_hook_and_gate_agree() -> None:
     assert not disagreements, "hook and gate disagree:\n  " + "\n  ".join(disagreements)
 
 
+def _git_repo_with(tmp_path: Path, rel: str, content: str) -> Path:
+    env_free = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), *env_free, "commit", "-q", "-m", "seed"], check=True)
+    return tmp_path
+
+
+def test_a_tracked_path_with_a_non_ascii_name_is_scanned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without `-z`, `git ls-files` C-quotes `docs/résumé.md` as
+    `"docs/r\\303\\251sum\\303\\251.md"`, which names no file: it was
+    counted in "scanned N tracked files" and never read."""
+    rel = "docs/r\u00e9sum\u00e9.md"
+    root = _git_repo_with(tmp_path, rel, f"{_CORPUS['bad'][0]}\n")
+    monkeypatch.setattr(gate, "ROOT", root)
+
+    files = gate._git_paths("ls-files")
+
+    assert files == [rel]
+    assert [hit[0] for hit in gate.scan_files(files)] == [rel]
+
+
 def test_patterns_file_is_not_empty() -> None:
     """A pattern file that fails to load would make the gate silently permissive."""
     assert gate.PATTERNS, "no patterns loaded — the gate would pass everything"

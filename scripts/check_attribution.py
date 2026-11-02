@@ -122,6 +122,16 @@ def scan_text(text: str, origin: str) -> list[tuple[str, int, str]]:
     return hits
 
 
+def _git_paths(*args: str) -> list[str]:
+    """Paths from a git listing command, read NUL-separated.
+
+    Without `-z`, git C-quotes any path with a non-ASCII byte
+    (`"docs/r\\303\\251sum\\303\\251.md"`); that string names no file, so the
+    path was counted as scanned and silently skipped.
+    """
+    return [p for p in _git(*args, "-z").split("\0") if p]
+
+
 def _git(*args: str) -> str:
     r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
     if r.returncode != 0:
@@ -247,12 +257,12 @@ def main() -> int:
     scanned: list[str] = []
 
     if args.all:
-        files = [f for f in _git("ls-files").splitlines() if f]
+        files = _git_paths("ls-files")
         hits += scan_files(files)
         scanned.append(f"{len(files)} tracked files")
 
     if args.diff_base:
-        files = [f for f in _git("diff", "--name-only", f"{args.diff_base}...HEAD").splitlines() if f]
+        files = _git_paths("diff", "--name-only", f"{args.diff_base}...HEAD")
         hits += scan_files(files)
         scanned.append(f"{len(files)} changed files vs {args.diff_base}")
 
