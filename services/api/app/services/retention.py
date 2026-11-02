@@ -9,6 +9,7 @@ misconfiguration (0 days / 100 years) from nuking or never-purging data.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -57,9 +58,16 @@ def _clamp(value: int, ceiling: int = MAX_DAYS) -> int:
     return max(MIN_DAYS, min(ceiling, int(value)))
 
 
-def resolve_policy(config: dict[str, int] | None) -> RetentionPolicy:
-    """Merge a tenant's stored config over defaults, clamped to safe bounds."""
-    cfg = dict(config or {})
+def resolve_policy(config: Mapping[str, int | None] | None) -> RetentionPolicy:
+    """Merge a tenant's stored config over defaults, clamped to safe bounds.
+
+    A key whose value is None is unset, not zero. `PUT /retention` builds its
+    config from the stored row, and on a tenant's first PUT that row is new
+    and its column defaults have not been applied yet, so every window the
+    body leaves out arrives here as None -- which `cfg.get(key, default)`
+    returned as-is and `int(None)` turned into a 500.
+    """
+    cfg = {key: value for key, value in (config or {}).items() if value is not None}
     return RetentionPolicy(
         raw_events_days=_clamp(cfg.get("raw_events_days", DEFAULT_RETENTION["raw_events"]), MAX_LAKE_DAYS),
         alerts_days=_clamp(cfg.get("alerts_days", DEFAULT_RETENTION["alerts"])),

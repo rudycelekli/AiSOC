@@ -26,6 +26,15 @@ def test_tenant_override_merges():
     assert policy.alerts_days == 365  # default preserved
 
 
+def test_an_unset_window_takes_the_default():
+    """`PUT /retention` passes the stored row's values for windows the body
+    omits, and on a tenant's first PUT those are None."""
+    policy = resolve_policy({"raw_events_days": None, "alerts_days": 30, "audit_days": None})
+    assert policy.alerts_days == 30
+    assert policy.raw_events_days == resolve_policy(None).raw_events_days
+    assert policy.audit_days == resolve_policy(None).audit_days
+
+
 def test_bounds_are_clamped():
     assert resolve_policy({"raw_events_days": 0}).raw_events_days == MIN_DAYS
     assert resolve_policy({"alerts_days": 99999}).alerts_days == MAX_DAYS
