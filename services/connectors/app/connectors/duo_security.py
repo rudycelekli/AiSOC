@@ -20,6 +20,11 @@ from app.connectors.base import BaseConnector, Capability, ConnectorSchema, Fiel
 
 logger = structlog.get_logger()
 
+# The v2 authentication-log endpoint's documented maximum page size.
+_PAGE_LIMIT = 1000
+# Bounds a single poll; a window that needs more pages logs the cap.
+_MAX_PAGES = 50
+
 
 class DuoSecurityConnector(BaseConnector):
     connector_id = "duo_security"
@@ -82,18 +87,34 @@ class DuoSecurityConnector(BaseConnector):
     async def fetch_alerts(self, since_seconds: int = 300) -> list[dict[str, Any]]:
         mintime = str(int((datetime.now(UTC) - timedelta(seconds=since_seconds)).timestamp()) * 1000)
         path = "/admin/v2/logs/authentication"
-        params = {"mintime": mintime, "maxtime": str(int(datetime.now(UTC).timestamp()) * 1000)}
+        params = {
+            "mintime": mintime,
+            "maxtime": str(int(datetime.now(UTC).timestamp()) * 1000),
+            "limit": str(_PAGE_LIMIT),
+        }
 
-        date_str, auth = self._sign("GET", path, params)
-
+        logs: list[dict[str, Any]] = []
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"https://{self._host}{path}",
-                headers={"Date": date_str, "Authorization": auth},
-                params=params,
-            )
-            resp.raise_for_status()
-            logs = resp.json().get("response", {}).get("authlogs", [])
+            # Duo returns one page (100 entries by default) and documents
+            # fetching the rest by sending back `metadata.next_offset` for as
+            # long as a response carries one. Reading only the first page kept
+            # one page of the window and dropped the remainder for good.
+            for _ in range(_MAX_PAGES):
+                date_str, auth = self._sign("GET", path, params)
+                resp = await client.get(
+                    f"https://{self._host}{path}",
+                    headers={"Date": date_str, "Authorization": auth},
+                    params=params,
+                )
+                resp.raise_for_status()
+                body = resp.json().get("response", {})
+                logs.extend(body.get("authlogs", []))
+                next_offset = (body.get("metadata") or {}).get("next_offset")
+                if not next_offset:
+                    break
+                params = {**params, "next_offset": ",".join(str(part) for part in next_offset)}
+            else:
+                logger.warning("duo_security.fetch_page_cap_reached", pages=_MAX_PAGES, logs=len(logs))
 
         return [self.normalize(entry) for entry in logs]
 
