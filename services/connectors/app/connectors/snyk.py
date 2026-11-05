@@ -15,6 +15,9 @@ from app.connectors.base import BaseConnector, Capability, ConnectorSchema, Fiel
 
 logger = structlog.get_logger()
 
+# Bounds a single poll; a window that needs more pages logs the cap.
+_MAX_PAGES = 50
+
 # Snyk issues ship a native ``critical`` tier. AiSOC's 5-tier ladder
 # preserves it end-to-end so P1 supply-chain findings keep their original
 # priority.
@@ -103,14 +106,28 @@ class SnykConnector(BaseConnector):
             "created_after": since,
         }
 
+        issues: list[dict[str, Any]] = []
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{self._base_url}/rest/orgs/{self._org_id}/issues",
-                headers=self._headers(),
-                params=params,
-            )
-            resp.raise_for_status()
-            issues = resp.json().get("data", [])
+            # The REST API returns `limit` records and a `links.next` whose
+            # `starting_after` cursor names the last record seen. Reading only
+            # the first page kept 100 issues of the window and dropped the
+            # rest; the next poll's window starts later.
+            for _ in range(_MAX_PAGES):
+                resp = await client.get(
+                    f"{self._base_url}/rest/orgs/{self._org_id}/issues",
+                    headers=self._headers(),
+                    params=params,
+                )
+                resp.raise_for_status()
+                body = resp.json()
+                issues.extend(body.get("data", []))
+                next_link = (body.get("links") or {}).get("next")
+                cursor = httpx.URL(next_link).params.get("starting_after") if next_link else None
+                if not cursor:
+                    break
+                params = {**params, "starting_after": cursor}
+            else:
+                logger.warning("snyk.fetch_page_cap_reached", pages=_MAX_PAGES, issues=len(issues))
 
         return [self.normalize(i) for i in issues]
 
