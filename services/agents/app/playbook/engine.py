@@ -189,6 +189,12 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
+def _step_outcomes(context: dict[str, Any]) -> dict[str, Any]:
+    """A copy of the per-step outcomes a run has recorded, keyed by step id."""
+    recorded = context.get("steps")
+    return dict(recorded) if isinstance(recorded, dict) else {}
+
+
 def _evaluate_condition(condition: StepCondition, context: dict[str, Any]) -> bool:
     """Return True if the condition passes.
 
@@ -1034,7 +1040,12 @@ async def resume_after_approval(
         )
         return None
 
-    return await PlaybookEngine().resume(playbook, pause)
+    # Shipped packs gate the action an approval guards on
+    # `steps.<approval id>.outcome == 'approved'`. Nothing wrote that path, so
+    # the condition read None and every approved action was skipped.
+    steps = _step_outcomes(pause.run_context or {})
+    steps[pause.step_id] = {"outcome": "approved"}
+    return await PlaybookEngine().resume(playbook, pause, extra_context={"steps": steps})
 
 
 async def resume_wait(*, resume_token: str) -> PlaybookRun | None:
@@ -2219,6 +2230,13 @@ class PlaybookEngine:
                 for k, v in result.items():
                     if not k.startswith("_"):
                         pr.context[k] = v
+                # Conditions address an earlier step as `steps.<id>.outcome`
+                # (`steps.isolate_host.outcome == 'success'`). Written after
+                # the flatten above, so a result carrying its own `steps` key
+                # cannot replace the record.
+                steps = _step_outcomes(pr.context)
+                steps[step.id] = {"outcome": StepStatus(step_status).value}
+                pr.context["steps"] = steps
 
                 await _emit(
                     pr.run_id,
